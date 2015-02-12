@@ -366,7 +366,7 @@ class HTTPRequest(HTTPMessage):
                     400,
                     "Bad HTTP request line: %s" % repr(request_line)
                 )
-            host, port, _ = r
+            host, port, _ = "127.0.0.1", 4002, r[2]
             path = None
         else:
             form_in = "absolute"
