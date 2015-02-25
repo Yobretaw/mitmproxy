@@ -250,6 +250,7 @@ class ConnectionHandler:
         for i in subs:
             msg.append("  -> " + i)
         msg = "\n".join(msg)
+        #print msg
         self.channel.tell("log", Log(msg, level))
 
     def find_cert(self):

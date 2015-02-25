@@ -18,6 +18,8 @@ class ClientConnection(tcp.BaseHandler, stateobject.StateObject):
             self.clientcert = None
             self.ssl_established = None
 
+
+        self._mitm_info = {}
         self.timestamp_start = utils.timestamp()
         self.timestamp_end = None
         self.timestamp_ssl_setup = None

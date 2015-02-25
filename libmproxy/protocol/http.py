@@ -4,6 +4,8 @@ import urllib
 import urlparse
 import time
 import copy
+import sys
+import traceback
 from email.utils import parsedate_tz, formatdate, mktime_tz
 import threading
 from netlib import http, tcp, http_status
@@ -325,7 +327,7 @@ class HTTPRequest(HTTPMessage):
         )
 
     @classmethod
-    def from_stream(cls, rfile, include_body=True, body_size_limit=None):
+    def from_stream(cls, rfile, include_body=True, body_size_limit=None, client_conn=None):
         """
         Parse an HTTP request from a file stream
         """
@@ -366,7 +368,12 @@ class HTTPRequest(HTTPMessage):
                     400,
                     "Bad HTTP request line: %s" % repr(request_line)
                 )
-            host, port, _ = "127.0.0.1", 4002, r[2]
+
+            client_conn._mitm_info['originHost'] = r[0]
+            client_conn._mitm_info['originPort'] = r[1]
+
+            host, port, _ = '127.0.0.1', 4002, r[2]
+            #host, port, _ = r
             path = None
         else:
             form_in = "absolute"
@@ -1041,18 +1048,30 @@ class HTTPHandler(ProtocolHandler):
             try:
                 req = HTTPRequest.from_stream(
                     self.c.client_conn.rfile,
-                    body_size_limit=self.c.config.body_size_limit
+                    body_size_limit=self.c.config.body_size_limit,
+                    client_conn=self.c.client_conn
                 )
             except tcp.NetLibError:
                 # don't throw an error for disconnects that happen
                 # before/between requests.
                 return False
+            #cc = self.c.client_conn
+            #print ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+            #print cc._mitm_info
+
+            #if req.method.upper() == 'CONNECT':
+            #    cc._mitm_info['originHost'] = req.host
+            #    cc._mitm_info['originPort'] = req.port
+            #elif req.scheme == 'https':
+            #    req.host = cc._mitm_info['originHost']
+            #    req.port = cc._mitm_info['originPort']
+
             self.c.log(
                 "request",
                 "debug",
                 [req._assemble_first_line(req.form_in)]
             )
-            ret = self.process_request(flow, req)
+            ret = self.process_request(flow, req, self.c.client_conn)
             if ret is not None:
                 return ret
 
@@ -1198,7 +1217,7 @@ class HTTPHandler(ProtocolHandler):
         self.c.client_conn.wfile.write(html_content)
         self.c.client_conn.wfile.flush()
 
-    def process_request(self, flow, request):
+    def process_request(self, flow, request, client_conn=None):
         """
         @returns:
         True, if the request should not be sent upstream
@@ -1206,7 +1225,8 @@ class HTTPHandler(ProtocolHandler):
         None, if the request should be sent upstream
         (a status code != None should be returned directly by handle_flow)
         """
-
+        #traceback.print_stack()
+        print "------------------------------------------------"
         if not self.skip_authentication:
             self.authenticate(request)
 
@@ -1227,6 +1247,14 @@ class HTTPHandler(ProtocolHandler):
                 request.host, request.port = flow.server_conn.address.host, flow.server_conn.address.port
 
         # Now we can process the request.
+        #print "==============================================="
+        #print request.method
+        #print request.scheme
+        #print request.host
+        #print request.port
+        #print request.path
+        #print request.headers
+        #print "==============================================="
         if request.form_in == "authority":
             if self.c.client_conn.ssl_established:
                 raise http.HttpError(
@@ -1235,16 +1263,17 @@ class HTTPHandler(ProtocolHandler):
                 )
 
             if self.c.config.mode == "regular":
-                self.c.set_server_address((request.host, request.port))
-                # Update server_conn attribute on the flow
-                flow.server_conn = self.c.server_conn
-                self.c.establish_server_connection()
                 self.c.client_conn.send(
                     'HTTP/1.1 200 Connection established\r\n' +
                     'Content-Length: 0\r\n' +
                     ('Proxy-agent: %s\r\n' % self.c.config.server_version) +
                     '\r\n'
                 )
+                self.c.set_server_address(('127.0.0.1', 4002))
+                #self.c.set_server_address((request.host, request.port))
+                # Update server_conn attribute on the flow
+                flow.server_conn = self.c.server_conn
+                self.c.establish_server_connection()
                 return self.process_connect_request(self.c.server_conn.address)
             elif self.c.config.mode == "upstream":
                 return None
@@ -1254,7 +1283,6 @@ class HTTPHandler(ProtocolHandler):
                 pass
 
         elif request.form_in == self.expected_form_in:
-
             request.form_out = self.expected_form_out
 
             if request.form_in == "absolute":
@@ -1366,6 +1394,7 @@ class HTTPHandler(ProtocolHandler):
         Returns True if the CONNECT request has been processed successfully.
         Returns False, if the connection should be closed immediately.
         """
+        #traceback.print_stack()
         address = tcp.Address.wrap(address)
         if self.c.config.check_ignore(address):
             self.c.log("Ignore host: %s:%s" % address(), "info")
